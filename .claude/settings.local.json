@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir /s /b \"D:\\\\Projects\\\\HeartBits\\\\*.json\" \"D:\\\\Projects\\\\HeartBits\\\\*.yaml\" \"D:\\\\Projects\\\\HeartBits\\\\*.yml\" \"D:\\\\Projects\\\\HeartBits\\\\*.toml\")"
+    ]
+  }
+}
