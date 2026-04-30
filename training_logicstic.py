@@ -1,5 +1,5 @@
 """
-train_model.py — Stroke Alert VN
+training_logicstic.py — Stroke Alert VN
 Chạy script này TRƯỚC khi chạy app.py.
 Yêu cầu: file 'healthcare-dataset-stroke-data.csv' cùng thư mục.
 Output: stroke_final_model.pkl và preprocessor_meta.pkl

@@ -3,13 +3,18 @@ app.py — Stroke Alert VN  v3
 Chạy: streamlit run app.py
 """
 
-import os
 from datetime import datetime
 
-import joblib
-import numpy as np
-import pandas as pd
 import streamlit as st
+
+from stroke_logic import (
+    build_feature_row,
+    calc_xai_groups,
+    compute_risk_summary,
+    get_ml_probability,
+    get_score_meta,
+    load_artifacts,
+)
 
 # ╔══════════════════════════════════════════════════════════════════════╗
 # ║  0. PAGE CONFIG                                                      ║
@@ -104,15 +109,11 @@ hr { margin: 1.5rem 0 !important; border-color: #dee2e6 !important; }
 # ╚══════════════════════════════════════════════════════════════════════╝
 
 @st.cache_resource(show_spinner="Đang nạp mô hình AI...")
-def load_artifacts():
-    if not os.path.exists("stroke_final_model.pkl"):
-        return None, None
-    return (
-        joblib.load("stroke_final_model.pkl"),
-        joblib.load("preprocessor_meta.pkl"),
-    )
+def load_cached_artifacts():
+    return load_artifacts()
 
-model, meta = load_artifacts()
+
+model, meta = load_cached_artifacts()
 
 
 # ╔══════════════════════════════════════════════════════════════════════╗
@@ -141,80 +142,6 @@ def card(title: str):
 
 def pill_html(text: str, cls: str) -> str:
     return f'<span class="pill {cls}">{text}</span>'
-
-
-def build_row(age, gender, work_type, smoking_status,
-              hypertension, heart_disease,
-              avg_glucose_level, bmi, feature_names) -> pd.DataFrame:
-    row = {
-        "age"              : float(age),
-        "hypertension"     : int(hypertension),
-        "heart_disease"    : int(heart_disease),
-        "avg_glucose_level": float(avg_glucose_level),
-        "bmi"              : float(bmi),
-        "gender_Female"          : int(gender == "Female"),
-        "gender_Male"            : int(gender == "Male"),
-        "gender_Other"           : int(gender == "Other"),
-        "work_type_Govt_job"     : int(work_type == "Govt_job"),
-        "work_type_Never_worked" : int(work_type == "Never_worked"),
-        "work_type_Private"      : int(work_type == "Private"),
-        "work_type_Self-employed": int(work_type == "Self-employed"),
-        "work_type_children"     : int(work_type == "children"),
-        "smoking_status_Unknown"        : int(smoking_status == "Unknown"),
-        "smoking_status_formerly smoked": int(smoking_status == "formerly smoked"),
-        "smoking_status_never smoked"   : int(smoking_status == "never smoked"),
-        "smoking_status_smokes"         : int(smoking_status == "smokes"),
-    }
-    df = pd.DataFrame([row])
-    for col in feature_names:
-        if col not in df.columns:
-            df[col] = 0
-    return df[feature_names]
-
-
-def get_ml_proba(df_row, scaler, mdl) -> float:
-    df_s = df_row.copy()
-    df_s[["age", "avg_glucose_level", "bmi"]] = scaler.transform(
-        df_row[["age", "avg_glucose_level", "bmi"]]
-    )
-    return float(mdl.predict_proba(df_s)[0][1])
-
-
-def calc_fast_pts(f, a, s, h) -> int:
-    return f + a + s + h
-
-
-def calc_xai_groups(df_row, meta) -> dict:
-    coeffs = meta["model_coefficients"]
-    scaler = meta["scaler"]
-    feat   = meta["feature_names"]
-    df_s   = df_row.copy()
-    df_s[["age", "avg_glucose_level", "bmi"]] = scaler.transform(
-        df_row[["age", "avg_glucose_level", "bmi"]]
-    )
-    groups = {
-        "Tuổi tác"      : ["age"],
-        "Huyết áp / Tim": ["hypertension", "heart_disease"],
-        "Đường huyết"   : ["avg_glucose_level"],
-        "Chỉ số BMI"    : ["bmi"],
-        "Hút thuốc"     : [c for c in feat if c.startswith("smoking_status_")],
-        "Nghề nghiệp"   : [c for c in feat if c.startswith("work_type_")],
-        "Giới tính"     : [c for c in feat if c.startswith("gender_")],
-    }
-    return {
-        name: round(
-            sum(abs(coeffs.get(c, 0) * df_s[c].values[0]) for c in cols), 3
-        )
-        for name, cols in groups.items()
-    }
-
-
-def get_score_meta(score: int):
-    if score >= 70: return "#C0392B", "NGUY CƠ RẤT CAO",    "error"
-    if score >= 50: return "#D85A30", "NGUY CƠ CAO",         "error"
-    if score >= 30: return "#D4A017", "NGUY CƠ TRUNG BÌNH", "warning"
-    return              "#27AE60", "NGUY CƠ THẤP",           "success"
-
 
 def render_score_bar(score: int, color: str):
     st.markdown(
@@ -251,7 +178,7 @@ st.markdown(
 if model is None:
     st.error(
         "**Chưa tìm thấy file model.**  \n"
-        "Chạy `python train_model.py` trước để tạo `stroke_final_model.pkl`.",
+        "Chạy `python training_logicstic.py` hoặc `train.bat` để tạo `stroke_final_model.pkl`.",
         icon="⚠️",
     )
     st.stop()
@@ -463,12 +390,11 @@ face_v     = FAST_INT[face_lbl]
 arm_v      = FAST_INT[arm_lbl]
 speech_v   = FAST_INT[speech_lbl]
 headache_v = FAST_INT[head_lbl]
-fast_max   = max(face_v, arm_v, speech_v, headache_v)
 
 feat_names = meta["feature_names"]
 scaler_obj = meta["scaler"]
 
-df_row = build_row(
+df_row = build_feature_row(
     age=tuoi, gender=gender, work_type=work_type,
     smoking_status=smoking_status,
     hypertension=hypertension, heart_disease=heart_disease,
@@ -476,31 +402,20 @@ df_row = build_row(
     feature_names=feat_names,
 )
 
-proba    = get_ml_proba(df_row, scaler_obj, model)
-ml_score = int(proba * 100)
-fast_sum = calc_fast_pts(face_v, arm_v, speech_v, headache_v)
-
-# New scoring: ML 40% + FAST 60%
-combined = int(ml_score * 0.4 + fast_sum)
-final_score = min(99, combined)
-
-# Safety overrides
-override_msg = None
-fast_values = [face_v, arm_v, speech_v, headache_v]
-count_clear_or_higher = sum(1 for v in fast_values if v >= 10)
-
-if fast_max == 15:
-    final_score  = 99
-    override_msg = (
-        "CẢNH BÁO: Triệu chứng FAST ở mức NẶNG — tình trạng CỰC KỲ KHẨN CẤP.\n"
-        "GỌI CẤP CỨU 115 NGAY LẬP TỨC!"
-    )
-elif count_clear_or_higher >= 2 and final_score < 80:
-    final_score  = 80
-    override_msg = (
-        "Lưu ý: Có ít nhất 2 triệu chứng FAST ở mức RÕ hoặc cao hơn — "
-        "điểm nguy cơ được điều chỉnh lên tối thiểu 80/100 để đảm bảo an toàn."
-    )
+proba = get_ml_probability(df_row, scaler_obj, model)
+risk_summary = compute_risk_summary(
+    ml_probability=proba,
+    fast_values={
+        "face": face_v,
+        "arm": arm_v,
+        "speech": speech_v,
+        "headache": headache_v,
+    },
+)
+ml_score = risk_summary["ml_score"]
+fast_sum = risk_summary["fast_sum"]
+final_score = risk_summary["final_score"]
+override_msg = risk_summary["override_msg"]
 
 color_hex, level_label, st_type = get_score_meta(final_score)
 
