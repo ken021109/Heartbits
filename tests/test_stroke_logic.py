@@ -90,6 +90,16 @@ class ComputeRiskSummaryTests(unittest.TestCase):
         self.assertEqual(80, summary["final_score"])
         self.assertIn("tối thiểu 80/100", summary["override_msg"])
 
+    def test_exact_two_ro_fast_symptoms_trigger_floor_without_severe_override(self):
+        summary = compute_risk_summary(
+            ml_probability=0.01,
+            fast_values={"face": 10, "arm": 0, "speech": 10, "headache": 0},
+        )
+
+        self.assertEqual(80, summary["final_score"])
+        self.assertNotIn("GỌI CẤP CỨU 115", summary["override_msg"])
+        self.assertIn("mức RÕ hoặc cao hơn", summary["override_msg"])
+
     def test_regular_case_uses_combined_score_without_override(self):
         summary = compute_risk_summary(
             ml_probability=0.50,
